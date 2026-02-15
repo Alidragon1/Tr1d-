@@ -1,0 +1,24 @@
+name: TON Sniper
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # هر ۳۰ دقیقه اجرا می‌شود
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run Sniper
+        env:
+          TON_PRIVATE_KEY: ${{ secrets.TON_PRIVATE_KEY }}
+          TON_API_KEY: ${{ secrets.TON_API_KEY }}
+          TOTAL_CAPITAL: ${{ secrets.TOTAL_CAPITAL }}
+        run: python ton_sniper_ultra_max_pro_plus_plus_real.py
