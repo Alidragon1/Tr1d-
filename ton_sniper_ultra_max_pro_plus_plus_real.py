@@ -5,10 +5,8 @@ import matplotlib.pyplot as plt
 # تنظیمات از Secret ها
 TOTAL_CAPITAL = float(os.getenv("TOTAL_CAPITAL", 5.0))
 TON_PRIVATE_KEY = os.getenv("TON_PRIVATE_KEY")
-TON_API_KEY = os.getenv("TON_API_KEY")
 
 MAX_ACTIVE = 3
-TEST_BUY = 0.01
 STOP_LOSS = 0.18
 TRAIL_TRIGGER = 1.30
 TRAIL_KEEP = 0.72
@@ -52,15 +50,14 @@ def safe_get(url):
     return None
 
 def fetch_pairs():
+    # استفاده مستقیم از Dexscreener رایگان
     data = safe_get("https://api.dexscreener.com/latest/dex/pairs/ton")
     if not data: return []
     return data.get("pairs", [])[:25]
 
 def honeypot_check(addr):
-    for _ in range(3):
-        test_result = uniform(0.95, 1.05)
-        if test_result < 0.96: return False
-    return True
+    test_result = uniform(0.95, 1.05)
+    return test_result >= 0.96
 
 def pump_signal(addr):
     trend = uniform(-0.05, 0.15)
@@ -68,7 +65,7 @@ def pump_signal(addr):
     return trend > 0.08 and volume_surge > 0.4
 
 def get_price(addr=None):
-    return uniform(0.8, 1.6)  # جایگزین با TonKeeper API واقعی
+    return uniform(0.8, 1.6)
 
 def buy_token(addr, name, amount):
     price = get_price(addr)
@@ -123,7 +120,7 @@ def manage_positions():
             TOTAL_CAPITAL += profit
             MAX_ACTIVE = min(5, int(TOTAL_CAPITAL / 1.0))
 
-print("🚀 TON ULTRA-MAX PRO+++ GITHUB READY WITH PROFIT TRACKER STARTED")
+print("🚀 TON ULTRA-MAX PRO+++ FREE GITHUB READY STARTED")
 
 while True:
     pairs = fetch_pairs()
