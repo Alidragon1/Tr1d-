@@ -1,0 +1,6 @@
+*.pyc
+__pycache__/
+*.lock
+*.tmp
+shark.lock
+shark_state.json
