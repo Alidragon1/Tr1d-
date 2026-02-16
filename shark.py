@@ -49,12 +49,9 @@ class E:
 class F:
     @staticmethod
     def save(p,d):
-        try:
-            with tempfile.NamedTemporaryFile('w',delete=False) as t:
-                json.dump(d,t,indent=2)
-                os.replace(t.name,p)
-        except Exception as e:
-            print("Error saving state:", e)
+        with tempfile.NamedTemporaryFile('w',delete=False) as t:
+            json.dump(d,t,indent=2)
+            os.replace(t.name,p)
     @staticmethod
     def load(p,d):
         try: return json.load(open(p)) if os.path.exists(p) else d
@@ -193,39 +190,36 @@ class S:
     def gen(s,p,addr):
         r=[]; sc=0
         try:
-            l=float(p.get("liquidity",{}).get("usd",0))
-            v=float(p.get("volume",{}).get("h24",0))
-            pr=float(p.get("priceUsd",0))
-            m5=float(p.get("priceChange",{}).get("m5",0))
-            m15=float(p.get("priceChange",{}).get("m15",0))
-            txns=p.get("txns",{}).get("m5",{})
-            bm5=txns.get("buys",0)
-            sm5=txns.get("sells",0)
+            l=float(p["liquidity"]["usd"])
+            v=float(p["volume"]["h24"])
+            pr=float(p["priceUsd"])
+            m5,m15=float(p["priceChange"]["m5"]),float(p["priceChange"]["m15"])
+            bm5,sm5=p["txns"]["m5"]["buys"],p["txns"]["m5"]["sells"]
             # Liquidity
-            ls=min(l/20000*15,15); 
-            if ls>10: sc+=ls*s.w['l']; r.append(f"💰 {ls:.0f}")
+            ls=min(l/20000*15,15); sc+=ls*s.w['l'] if ls>10 else 0; ls>10 and r.append(f"💰 {ls:.0f}")
             # Volume
-            vs=min(v/50000*15,15)
-            if vs>10: sc+=vs*s.w['v']; r.append(f"📊 {vs:.0f}")
+            vs=min(v/50000*15,15); sc+=vs*s.w['v'] if vs>10 else 0; vs>10 and r.append(f"📊 {vs:.0f}")
             # Momentum
-            ms=min(m5*0.5+m15*0.3,20)
-            if ms>5: sc+=ms*s.w['m']; r.append(f"📈 {ms:.0f}")
+            ms=min(m5*0.5+m15*0.3,20); sc+=ms*s.w['m'] if ms>5 else 0; ms>5 and r.append(f"📈 {ms:.0f}")
             # Buy pressure
             if bm5+sm5>0:
-                bs=(bm5/(bm5+sm5))*15
-                if bs>10: sc+=bs*s.w['b']; r.append(f"🟢 {bs:.0f}")
+                bs=(bm5/(bm5+sm5))*15; sc+=bs*s.w['b'] if bs>10 else 0; bs>10 and r.append(f"🟢 {bs:.0f}")
             # Whale/Pump
             if bm5>30 and bm5>3*sm5: sc+=20*s.w['w']; r.append("🐋 20")
-            if float(p.get("volume",{}).get("m5",0))>float(p.get("volume",{}).get("h1",1))/12*5 and m5>3: sc+=20*s.w['p']; r.append("🚀 20")
+            if float(p["volume"]["m5"])>float(p["volume"]["h1"])/12*5 and m5>3: sc+=20*s.w['p']; r.append("🚀 20")
             # Technical indicators
             prs=list(s.a.ph[addr])
             if len(prs)>14:
-                rsi=s.a.rsi(prs)
-                if rsi<30: sc+=15*s.w['r']; r.append(f"📉 {rsi:.0f}")
+                rsi_val = s.a.rsi(prs)
+                if rsi_val<30:
+                    sc += 15*s.w['r']
+                    r.append(f"📉 {rsi_val:.0f}")
             vols=list(s.a.vh[addr])
             if vols and len(prs)>20:
                 bb=s.a.bb(prs)
-                if pr<bb[2]: sc+=15; r.append("📉 BB")
+                if pr<bb[2]:
+                    sc += 15
+                    r.append("📉 BB")
             # Risk
             risk=0
             if l<C.MIN_LIQUIDITY*1.5: risk+=20
@@ -237,9 +231,7 @@ class S:
             elif sc>65 and risk<60: sig='B'; conf=0.7
             elif sc>50: sig='W'; conf=0.5
             return sig, sc, conf, r[:3]
-        except Exception as e: 
-            print("Signal gen error:", e)
-            return 'E',0,0,['ERR']
+        except: return 'E',0,0,['ERR']
 
 #=============== TELEGRAM =================
 class T:
@@ -251,7 +243,7 @@ class T:
     def send(s,msg):
         if not C.TG_TOKEN: print(msg); return
         try:
-            s.s.post(f"https://api.telegram.org/bot{C.TG_TOKEN}/sendMessage",
+            r=s.s.post(f"https://api.telegram.org/bot{C.TG_TOKEN}/sendMessage",
                         json={"chat_id":C.CHAT_ID,"text":msg,"parse_mode":"HTML"})
         except: pass
     def buy(s,sym,sc,rs,sz,pr):
@@ -297,19 +289,25 @@ class T:
 #=============== TRADING ENGINE ===============
 class E:
     def __init__(s):
-        s.a=M(); s.sg=S(s.a); s.rm=R(C.INITIAL_CAPITAL); s.t=T()
-        s.pos={}; s.bl=set(); s.st={'t':0,'w':0,'l':0,'tp':0,'d':0,'dt':0}
-        s.run=False; s.last=datetime.now().date()
+        s.a=M()
+        s.sg=S(s.a)
+        s.rm=R(C.INITIAL_CAPITAL)
+        s.t=T()
+        s.pos={}
+        s.bl=set()
+        s.st={'t':0,'w':0,'l':0,'tp':0,'d':0,'dt':0}
+        s.running=False
+        s.last=datetime.now().date()
+
     def proc(s,p):
         try:
-            a=p.get('pairAddress')
-            if a in s.bl or not a: return
-            s.a.add(a,float(p.get('priceUsd',0)),float(p.get("volume",{}).get("h24",0)))
+            a=p['pairAddress']
+            if a in s.bl: return
+            s.a.add(a,float(p['priceUsd']),float(p['volume']['h24']))
             sig,sc,conf,rs=s.sg.gen(p,a)
-            if sig in['SB','B']: return {'a':a,'sym':p.get('baseToken',{}).get('symbol','?'),'p':float(p.get('priceUsd',0)),'sc':sc,'rs':rs}
-        except Exception as e:
-            print("Proc error:", e)
-            return
+            if sig in['SB','B']: return {'a':a,'sym':p['baseToken']['symbol'],'p':float(p['priceUsd']),'sc':sc,'rs':rs}
+        except: return
+
     def entry(s,o):
         if len(s.pos)>=C.MAX_POSITIONS or o['a'] in s.pos: return
         sz=s.rm.pos(o['sc'],0.3,s.a.regime(list(s.a.ph[o['a']])))
@@ -319,13 +317,15 @@ class E:
         s.pos[o['a']]={'sym':o['sym'],'ep':o['p'],'am':sz,'sl':sl,'tp':tp,'pk':o['p'],'sc':o['sc'],'rs':o['rs']}
         s.rm.c-=sz*o['p']
         s.t.buy(o['sym'],o['sc'],o['rs'],sz,o['p'])
+
     def check(s,a,pr):
         if a not in s.pos: return
         p=s.pos[a]
         if pr>p['pk']: p['pk']=pr
+        ch=(pr-p['ep'])/p['ep']
         if pr<=p['sl']: return ('SL',1)
         if pr>=p['tp']: return ('TP',1)
-        if pr<=p['pk']*(1-C.TRAILING_STOP): return ('TR',1)
+        if p['pk']>p['ep']*1.05 and pr<=p['pk']*(1-C.TRAILING_STOP): return ('TR',1)
 
     def exit(s,a,pr,reas,per):
         if a not in s.pos: return
@@ -347,30 +347,39 @@ class E:
 
     def run(s):
         print("🦈 SHARK X ACTIVE")
-        s.run = True
+        s.running = True
         last_daily = datetime.now()
-        while s.run:
+        while s.running:
             try:
                 # Stop condition
                 if s.rm.stop(): break
+
                 # Fetch market data
                 resp = requests.get(C.DEX_API, headers={"User-Agent":C.USER_AGENT}, timeout=C.API_TIMEOUT)
                 pairs = resp.json().get('pairs', [])
-                if not pairs: time.sleep(C.SCAN_INTERVAL); continue
+                if not pairs: 
+                    time.sleep(C.SCAN_INTERVAL)
+                    continue
+
                 # Process opportunities
-                opps = [s.proc(p) for p in pairs[:50] if s.proc(p)]
+                opps = []
+                for p in pairs[:50]:
+                    o = s.proc(p)
+                    if o: opps.append(o)
                 opps.sort(key=lambda x: x['sc'], reverse=True)
-                [s.entry(o) for o in opps[:C.MAX_POSITIONS]]
+                for o in opps[:C.MAX_POSITIONS]:
+                    s.entry(o)
+
                 # Check exits
                 for p in pairs:
                     for a in list(s.pos.keys()):
-                        try:
-                            chk = s.check(a, float(p.get('priceUsd',0)))
-                            if chk: s.exit(a, float(p.get('priceUsd',0)), *chk)
-                        except Exception as e:
-                            print("Check error:", e)
+                        chk = s.check(a, float(p['priceUsd']))
+                        if chk:
+                            s.exit(a, float(p['priceUsd']), *chk)
+
                 # Save state
                 F.save(C.STATE_FILE, {'c':s.rm.c,'pos':s.pos,'bl':list(s.bl)})
+
                 # Daily report every hour
                 if (datetime.now() - last_daily).seconds > 3600:
                     s.t.daily({
@@ -382,9 +391,10 @@ class E:
                         'op': len(s.pos)
                     })
                     last_daily = datetime.now()
+
                 time.sleep(C.SCAN_INTERVAL)
             except Exception as e:
-                print("Runtime error:", e)
+                print("Error:", e)
                 time.sleep(60)
 
 #=============== MAIN ===============
